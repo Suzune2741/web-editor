@@ -3,16 +3,25 @@ import { useLocation, useParams } from "react-router";
 import { EditorComponent } from "~/components/Editor";
 export type code = {
   id: string;
+  nodeType: string;
   code: string;
 };
 
 const FetchCode = async (id: string) => {
-  //実際のURLへ置き換える
-  const res = await fetch(`http://localhost:8000/code/${id}`);
-  if (!res.ok) {
+  //ToDo:実際のURLへ置き換える
+  //コンパイル
+  const compileRes = await fetch(`http://localhost:8000/code/${id}/convert`, {
+    method: "POST",
+  });
+  if (!compileRes.ok) {
     return "";
   }
-  const json = await res.json();
+  //コンパイルしたものを取得
+  const fetchCodeRes = await fetch(`http://localhost:8000/code/${id}`);
+  if (!fetchCodeRes.ok) {
+    return "";
+  }
+  const json = await fetchCodeRes.json();
   return json;
 };
 
@@ -21,17 +30,17 @@ export function Main() {
   const [openRight, setOpenRight] = useState<number>(0);
   const [openLeft, setOpenLeft] = useState<number>(0);
   const queryString = useLocation();
-  const mainid = queryString.search.split("=")[1];
+  const mainId = queryString.search.split("=")[1];
   useEffect(() => {
     const loadData = async () => {
-      if (!mainid) return;
-      const fetchedCode = await FetchCode(mainid);
-
-      console.log(fetchedCode.nodecodes);
+      if (!mainId) return;
+      const fetchedCode = await FetchCode(mainId);
+      console.log(fetchedCode.data);
       const newItems = [
-        { id: mainid, code: atob(fetchedCode.maincode) },
-        ...fetchedCode.nodecodes.map((data: code) => ({
+        { id: mainId, nodeType: "Main", code: atob(fetchedCode.data.mainCode) },
+        ...fetchedCode.data.nodeCodes.map((data: code) => ({
           id: data.id,
+          nodeType: data.nodeType,
           code: atob(data.code),
         })),
       ];
@@ -39,7 +48,7 @@ export function Main() {
       setCodeList((prevList) => [...prevList, ...newItems]);
     };
     loadData();
-  }, [mainid]);
+  }, [mainId]);
 
   const handleEditorChange = (value: string | undefined, openIndex: number) => {
     const newValue = value || "";
@@ -123,7 +132,7 @@ export function Main() {
           });
         }}
       >
-        再ビルド
+        再ビルド(動きません)
       </button>
       <input
         id="sendButton"
@@ -140,7 +149,7 @@ export function Main() {
               },
               body: JSON.stringify({
                 code: btoa(
-                  codeList.find((data: code) => data.id === mainid)?.code || "",
+                  codeList.find((data: code) => data.id === mainId)?.code || "",
                 ),
               }),
             },

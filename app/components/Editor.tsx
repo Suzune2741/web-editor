@@ -30,8 +30,7 @@ export const EditorComponent: React.FC<EditorComponentProps> = ({
             }
           >
             <button onClick={() => setOpen(index)} className="px-2 ">
-              {"ファイル名"}
-              {/* {data.id} */}
+              {data.nodeType}
             </button>
           </div>
         ))}
