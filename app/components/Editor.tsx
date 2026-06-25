@@ -38,8 +38,8 @@ export const EditorComponent: React.FC<EditorComponentProps> = ({
   };
 
   return (
-    <div className="w-full">
-      <div className="flex flex-row gap-2 mb-2 bg-amber-100">
+    <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+      <div className="flex flex-row gap-2 mb-2 bg-amber-100 shrink-0 overflow-x-auto">
         {codeList.map((data: CodeListType, index: number) => (
           <div
             key={data.id}
@@ -82,17 +82,19 @@ export const EditorComponent: React.FC<EditorComponentProps> = ({
           <FaRegPlusSquare />
         </button>
       </div>
-      <Editor
-        theme="vs-dark"
-        height="40rem"
-        defaultLanguage="ruby"
-        value={code}
-        onChange={handleEditorChange}
-        options={{
-          minimap: { enabled: false },
-          scrollbar: { horizontal: "hidden" },
-        }}
-      />
+      <div className="flex-1 min-h-0">
+        <Editor
+          theme="vs-dark"
+          height="calc(100vh - 120px)"
+          defaultLanguage="ruby"
+          value={code}
+          onChange={handleEditorChange}
+          options={{
+            minimap: { enabled: false },
+            scrollbar: { horizontal: "hidden", alwaysConsumeMouseWheel: false },
+          }}
+        />
+      </div>
     </div>
   );
 };

@@ -68,7 +68,7 @@ export function Main() {
   };
 
   return (
-    <div className="w-screen">
+    <div>
       <h1 className="flex  text-3xl font-bold m-2 text-gray-800">
         mruby/c Editor
       </h1>

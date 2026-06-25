@@ -7,8 +7,10 @@
 
 html,
 body {
-  @apply bg-gray-50 ;
-
+  @apply bg-gray-50;
+  height: 100%;
+  margin: 0;
+  overflow-x: hidden;
   @media (prefers-color-scheme: dark) {
     color-scheme: dark;
   }
