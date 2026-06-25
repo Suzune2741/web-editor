@@ -8,16 +8,20 @@ export type code = {
 };
 
 const FetchCode = async (id: string) => {
-  //ToDo:実際のURLへ置き換える
   //コンパイル
-  const compileRes = await fetch(`http://localhost:8000/code/${id}/convert`, {
-    method: "POST",
-  });
+  const compileRes = await fetch(
+    `https://ceres.epi.it.matsue-ct.ac.jp/rwire/project/${id}/convert`,
+    {
+      method: "POST",
+    },
+  );
   if (!compileRes.ok) {
     return "";
   }
   //コンパイルしたものを取得
-  const fetchCodeRes = await fetch(`http://localhost:8000/code/${id}`);
+  const fetchCodeRes = await fetch(
+    `https://ceres.epi.it.matsue-ct.ac.jp/rwire/project/${id}`,
+  );
   if (!fetchCodeRes.ok) {
     return "";
   }
@@ -64,108 +68,113 @@ export function Main() {
   };
 
   return (
-    <div>
-      <h1 className="flex justify-center text-3xl font-bold m-2">
+    <div className="w-screen">
+      <h1 className="flex  text-3xl font-bold m-2 text-gray-800">
         mruby/c Editor
       </h1>
-      <main className=" mx-4 border-3 dark:border-zinc-400 bg-white">
-        <div className="flex">
-          <EditorComponent
-            code={codeList[openRight]?.code || ""}
-            handleEditorChange={(value) => handleEditorChange(value, openRight)}
-            codeList={codeList}
-            open={openRight}
-            setOpen={setOpenRight}
-          />
-          <span className="w-1 bg-gray-800" />
-          <EditorComponent
-            code={codeList[openLeft]?.code || ""}
-            handleEditorChange={(value) => handleEditorChange(value, openLeft)}
-            codeList={codeList}
-            open={openLeft}
-            setOpen={setOpenLeft}
-          />
-        </div>
-      </main>
-
-      <button
-        className="m-4 bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded cursor-pointer"
-        onClick={async () => {
-          const res = await fetch(
-            "https://ceres.epi.it.matsue-ct.ac.jp/compile/code",
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                code: codeList.map((obj) => btoa(obj.code)),
-              }),
-            },
-          );
-          if (!res.ok) {
-            alert("アップロードに失敗しました");
-            return;
-          }
-          const json = await res.json();
-          console.log(json.id);
-          const ids = json.id.split("_");
-          console.log(ids);
-          ids.map(async (id: string) => {
-            const compileRes = await fetch(
-              `https://ceres.epi.it.matsue-ct.ac.jp/compile/code/${id}/compile`,
+      <div className="flex flex-row justify-end m-2">
+        <input
+          id="sendButton"
+          type="submit"
+          value="マイコンへ書き込む"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          onClick={async () => {
+            const res = await fetch(
+              "https://ceres.epi.it.matsue-ct.ac.jp/compile/code",
               {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
                 },
                 body: JSON.stringify({
-                  version: "3.3.0",
+                  code: btoa(
+                    codeList.find((data: code) => data.id === mainId)?.code ||
+                      "",
+                  ),
                 }),
               },
             );
-            if (!compileRes.ok) {
+            if (!res.ok) {
               alert("アップロードに失敗しました");
               return;
             }
-            const json = await compileRes.json();
-          });
-        }}
-      >
-        再ビルド(動きません)
-      </button>
-      <input
-        id="sendButton"
-        type="submit"
-        value="マイコンへ書き込む"
-        className="m-4 bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded cursor-pointer"
-        onClick={async () => {
-          const res = await fetch(
-            "https://ceres.epi.it.matsue-ct.ac.jp/compile/code",
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                code: btoa(
-                  codeList.find((data: code) => data.id === mainId)?.code || "",
-                ),
-              }),
-            },
-          );
-          if (!res.ok) {
-            alert("アップロードに失敗しました");
-            return;
-          }
 
-          const json = await res.json();
-          window.open(
-            `https://ceres.epi.it.matsue-ct.ac.jp/writer?id=${json.id}`,
-            "_blank",
-          );
-        }}
-      />
+            const json = await res.json();
+            window.open(
+              `https://ceres.epi.it.matsue-ct.ac.jp/writer?id=${json.id}`,
+              "_blank",
+            );
+          }}
+        />
+        {/* <button
+          className="disable m-4 bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded cursor-pointer"
+          onClick={async () => {
+            const res = await fetch(
+              "https://ceres.epi.it.matsue-ct.ac.jp/compile/code",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  code: codeList.map((obj) => btoa(obj.code)),
+                }),
+              },
+            );
+            if (!res.ok) {
+              alert("アップロードに失敗しました");
+              return;
+            }
+            const json = await res.json();
+            console.log(json.id);
+            const ids = json.id.split("_");
+            console.log(ids);
+            ids.map(async (id: string) => {
+              const compileRes = await fetch(
+                `https://ceres.epi.it.matsue-ct.ac.jp/compile/code/${id}/compile`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    version: "3.3.0",
+                  }),
+                },
+              );
+              if (!compileRes.ok) {
+                alert("アップロードに失敗しました");
+                return;
+              }
+              const json = await compileRes.json();
+              console.log(json);
+            });
+          }}
+        >
+          再ビルド(動きません)
+        </button> */}
+      </div>
+      <div className="mx-2 border-3 dark:border-zinc-400 bg-black">
+        <div className="flex">
+          <EditorComponent
+            code={codeList[openRight]?.code || ""}
+            handleEditorChange={(value) => handleEditorChange(value, openRight)}
+            codeList={codeList}
+            setCodeList={setCodeList}
+            open={openRight}
+            setOpen={setOpenRight}
+          />
+          <span className="w-1 bg-gray-100" />
+          <EditorComponent
+            code={codeList[openLeft]?.code || ""}
+            handleEditorChange={(value) => handleEditorChange(value, openLeft)}
+            codeList={codeList}
+            setCodeList={setCodeList}
+            open={openLeft}
+            setOpen={setOpenLeft}
+          />
+        </div>
+      </div>
     </div>
   );
 }
