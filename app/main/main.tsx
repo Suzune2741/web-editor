@@ -33,6 +33,7 @@ export function Main() {
   const [codeList, setCodeList] = useState<code[]>([]);
   const [openRight, setOpenRight] = useState<number>(0);
   const [openLeft, setOpenLeft] = useState<number>(0);
+  const [isMultiEditor, setIsMultiEditor] = useState(false);
   const queryString = useLocation();
   const mainId = queryString.search.split("=")[1];
   useEffect(() => {
@@ -66,13 +67,22 @@ export function Main() {
       return newList;
     });
   };
+  const toggleMultiEditor = () => {
+    setIsMultiEditor((prev) => !prev);
+  };
 
   return (
     <div>
       <h1 className="flex  text-3xl font-bold m-2 text-gray-800">
         mruby/c Editor
       </h1>
-      <div className="flex flex-row justify-end m-2">
+      <div className="flex flex-row justify-end m-2 gap-2">
+        <button
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          onClick={toggleMultiEditor}
+        >
+          {isMultiEditor ? "タブを1つにする" : "タブを2つにする"}
+        </button>
         <input
           id="sendButton"
           type="submit"
@@ -106,56 +116,9 @@ export function Main() {
             );
           }}
         />
-        {/* <button
-          className="disable m-4 bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded cursor-pointer"
-          onClick={async () => {
-            const res = await fetch(
-              "https://ceres.epi.it.matsue-ct.ac.jp/compile/code",
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                  code: codeList.map((obj) => btoa(obj.code)),
-                }),
-              },
-            );
-            if (!res.ok) {
-              alert("アップロードに失敗しました");
-              return;
-            }
-            const json = await res.json();
-            console.log(json.id);
-            const ids = json.id.split("_");
-            console.log(ids);
-            ids.map(async (id: string) => {
-              const compileRes = await fetch(
-                `https://ceres.epi.it.matsue-ct.ac.jp/compile/code/${id}/compile`,
-                {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify({
-                    version: "3.3.0",
-                  }),
-                },
-              );
-              if (!compileRes.ok) {
-                alert("アップロードに失敗しました");
-                return;
-              }
-              const json = await compileRes.json();
-              console.log(json);
-            });
-          }}
-        >
-          再ビルド(動きません)
-        </button> */}
       </div>
-      <div className="mx-2 border-3 dark:border-zinc-400 bg-black">
-        <div className="flex">
+      <div className="mx-2 border-3 dark:border-zinc-400 ">
+        <div className="flex bg-gray-800">
           <EditorComponent
             code={codeList[openRight]?.code || ""}
             handleEditorChange={(value) => handleEditorChange(value, openRight)}
@@ -164,15 +127,21 @@ export function Main() {
             open={openRight}
             setOpen={setOpenRight}
           />
-          <span className="w-1 bg-gray-100" />
-          <EditorComponent
-            code={codeList[openLeft]?.code || ""}
-            handleEditorChange={(value) => handleEditorChange(value, openLeft)}
-            codeList={codeList}
-            setCodeList={setCodeList}
-            open={openLeft}
-            setOpen={setOpenLeft}
-          />
+          {isMultiEditor && (
+            <>
+              <span className="w-1 bg-gray-100" />
+              <EditorComponent
+                code={codeList[openLeft]?.code || ""}
+                handleEditorChange={(value) =>
+                  handleEditorChange(value, openLeft)
+                }
+                codeList={codeList}
+                setCodeList={setCodeList}
+                open={openLeft}
+                setOpen={setOpenLeft}
+              />
+            </>
+          )}
         </div>
       </div>
     </div>
