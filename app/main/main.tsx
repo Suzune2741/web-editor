@@ -111,7 +111,7 @@ export function Main() {
 
             const json = await res.json();
             window.open(
-              `https://ceres.epi.it.matsue-ct.ac.jp/writer?id=${json.id}`,
+              `https://kaniwriter.poporon.org/?id=${json.id}`,
               "_blank",
             );
           }}
