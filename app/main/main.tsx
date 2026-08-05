@@ -8,11 +8,13 @@ export type code = {
 };
 
 const FetchCode = async (id: string) => {
+  const version: string = "3.4.0";
   //コンパイル
   const compileRes = await fetch(
     `https://ceres.epi.it.matsue-ct.ac.jp/rwire/project/${id}/convert`,
     {
       method: "POST",
+      body: JSON.stringify({ version: version }),
     },
   );
   if (!compileRes.ok) {
