@@ -7,8 +7,7 @@ export type code = {
   code: string;
 };
 
-const FetchCode = async (id: string) => {
-  const version: string = "3.4.0";
+const FetchCode = async (id: string, version: string) => {
   //コンパイル
   const compileRes = await fetch(
     `https://ceres.epi.it.matsue-ct.ac.jp/rwire/project/${id}/convert`,
@@ -18,14 +17,14 @@ const FetchCode = async (id: string) => {
     },
   );
   if (!compileRes.ok) {
-    return "";
+    return null;
   }
   //コンパイルしたものを取得
   const fetchCodeRes = await fetch(
     `https://ceres.epi.it.matsue-ct.ac.jp/rwire/project/${id}`,
   );
   if (!fetchCodeRes.ok) {
-    return "";
+    return null;
   }
   const json = await fetchCodeRes.json();
   return json;
@@ -37,11 +36,27 @@ export function Main() {
   const [openLeft, setOpenLeft] = useState<number>(0);
   const [isMultiEditor, setIsMultiEditor] = useState(false);
   const queryString = useLocation();
-  const mainId = queryString.search.split("=")[1];
+  const [mainId, setMainId] = useState<string>();
+  const compilerVersions = ["3.4.0", "4.0.0"];
+  useEffect(() => {
+    setMainId(queryString.search.split("=")[1]);
+  },[]);
+
+  const [compilerVersion, setCompilerVersion] = useState(() => {
+    if (typeof window === "undefined") {
+      return compilerVersions[0] || "";
+    }
+    return localStorage.getItem("compilerVersion") || compilerVersions[0] || "";
+  });
+
+  useEffect(() => {
+    localStorage.setItem("compilerVersion", compilerVersion);
+  }, [compilerVersion]);
+
   useEffect(() => {
     const loadData = async () => {
       if (!mainId) return;
-      const fetchedCode = await FetchCode(mainId);
+      const fetchedCode = await FetchCode(mainId, compilerVersion);
       console.log(fetchedCode.data);
       const newItems = [
         { id: mainId, nodeType: "Main", code: atob(fetchedCode.data.mainCode) },
@@ -52,10 +67,14 @@ export function Main() {
         })),
       ];
 
-      setCodeList((prevList) => [...prevList, ...newItems]);
+      setCodeList((prevList) => {
+        const newIds = new Set(newItems.map((item) => item.id));
+        const filtered = prevList.filter((item) => !newIds.has(item.id));
+        return [...filtered, ...newItems];
+      });
     };
     loadData();
-  }, [mainId]);
+  }, [mainId, compilerVersion]);
 
   const handleEditorChange = (value: string | undefined, openIndex: number) => {
     const newValue = value || "";
@@ -75,16 +94,18 @@ export function Main() {
 
   return (
     <div>
-      <h1 className="flex  text-3xl font-bold m-2 text-gray-800">
+      <h1 className="flex text-3xl font-bold m-2 text-gray-800">
         mruby/c Editor
       </h1>
-      <div className="flex flex-row justify-end m-2 gap-2">
+
+      <div className="flex flex-row items-end justify-end m-2 gap-3">
         <button
           className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           onClick={toggleMultiEditor}
         >
           {isMultiEditor ? "タブを1つにする" : "タブを2つにする"}
         </button>
+
         <input
           id="sendButton"
           type="submit"
@@ -118,6 +139,29 @@ export function Main() {
             );
           }}
         />
+
+        <div className="flex flex-col gap-1">
+          <label
+            htmlFor="compilerVersion"
+            className="text-sm font-medium text-gray-700"
+          >
+            コンパイラバージョン
+          </label>
+          <select
+            id="compilerVersion"
+            value={compilerVersion}
+            onChange={(e) => setCompilerVersion(e.target.value)}
+            className="flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            {compilerVersions.map((version) => {
+              return (
+                <option key={version} value={version}>
+                  {version}
+                </option>
+              );
+            })}
+          </select>
+        </div>
       </div>
       <div className="mx-2 border-3 dark:border-zinc-400 ">
         <div className="flex bg-gray-800">
@@ -128,6 +172,7 @@ export function Main() {
             setCodeList={setCodeList}
             open={openRight}
             setOpen={setOpenRight}
+            setMainId={setMainId}
           />
           {isMultiEditor && (
             <>
@@ -141,6 +186,7 @@ export function Main() {
                 setCodeList={setCodeList}
                 open={openLeft}
                 setOpen={setOpenLeft}
+                setMainId={setMainId}
               />
             </>
           )}
