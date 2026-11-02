@@ -165,19 +165,16 @@ export function Main() {
           code: encodeBase64(item.code),
         }));
 
-      const res = await fetch(
-        `http://localhost:8080/project/${mainId}/recompile`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            version: compilerVersion,
-            nodeCodes,
-          }),
+      const res = await fetch(`${API_BASE}/project/${mainId}/recompile`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-      );
+        body: JSON.stringify({
+          version: compilerVersion,
+          nodeCodes,
+        }),
+      });
 
       const json = await res.json();
 
