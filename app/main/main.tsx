@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useLocation } from "react-router";
+import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router";
 import { EditorComponent } from "~/components/Editor";
 
 export type code = {
@@ -9,8 +9,33 @@ export type code = {
 };
 
 const API_BASE = "https://ceres.epi.it.matsue-ct.ac.jp/rwire";
+const COMPILE_URL = "https://ceres.epi.it.matsue-ct.ac.jp/compile/code";
 
-const encodeBase64 = (value: string) => {
+const COMPILER_VERSIONS = ["3.4.0", "4.0.0"] as const;
+type CompilerVersion = (typeof COMPILER_VERSIONS)[number];
+const DEFAULT_VERSION: CompilerVersion = COMPILER_VERSIONS[0];
+const VERSION_STORAGE_KEY = "compilerVersion";
+
+type ProjectData = {
+  mainCode: string;
+  nodeCodes: code[];
+};
+
+type ProjectResponse = {
+  status: string;
+  data?: ProjectData;
+  error?: { message?: string; details?: string };
+};
+
+type Status = "idle" | "converting" | "recompiling";
+
+const BUTTON_BASE =
+  "flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors";
+const BUTTON_GREEN = `${BUTTON_BASE} bg-emerald-600 hover:bg-emerald-700`;
+const BUTTON_BLUE = `${BUTTON_BASE} bg-blue-600 hover:bg-blue-700`;
+
+
+const encodeBase64 = (value: string): string => {
   const bytes = new TextEncoder().encode(value);
   let binary = "";
   for (const byte of bytes) {
@@ -19,231 +44,266 @@ const encodeBase64 = (value: string) => {
   return btoa(binary);
 };
 
-const decodeBase64 = (value: string) => {
+const decodeBase64 = (value: string): string => {
   const binary = atob(value);
   const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
   return new TextDecoder().decode(bytes);
 };
 
-const FetchCode = async (id: string, version: string) => {
-  const compileRes = await fetch(`${API_BASE}/project/${id}/convert`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ version }),
-  });
+class ApiError extends Error {}
 
-  if (!compileRes.ok) {
+const errorMessage = (e: unknown, fallback: string) =>
+  e instanceof ApiError ? e.message : fallback;
+
+const readJson = async <T,>(res: Response): Promise<T | null> => {
+  try {
+    return (await res.json()) as T;
+  } catch {
     return null;
   }
-
-  const fetchCodeRes = await fetch(`${API_BASE}/project/${id}`);
-
-  if (!fetchCodeRes.ok) {
-    return null;
-  }
-
-  return await fetchCodeRes.json();
 };
 
-export function Main() {
-  const [codeList, setCodeList] = useState<code[]>([]);
-  const [openRight, setOpenRight] = useState<number>(0);
-  const [openLeft, setOpenLeft] = useState<number>(0);
-  const [isMultiEditor, setIsMultiEditor] = useState(false);
-  const [isRecompiling, setIsRecompiling] = useState(false);
-  const [isConverting, setIsConverting] = useState(false);
-
-  const queryString = useLocation();
-  const [mainId, setMainId] = useState<string>();
-  const compilerVersions = ["3.4.0", "4.0.0"];
-
-  useEffect(() => {
-    const params = new URLSearchParams(queryString.search);
-    setMainId(params.get("id") ?? undefined);
-  }, [queryString.search]);
-
-  const [compilerVersion, setCompilerVersion] = useState(() => {
-    if (typeof window === "undefined") {
-      return compilerVersions[0] || "";
-    }
-
-    return localStorage.getItem("compilerVersion") || compilerVersions[0] || "";
+const postJson = (url: string, body: unknown, signal?: AbortSignal) =>
+  fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
   });
 
-  useEffect(() => {
-    localStorage.setItem("compilerVersion", compilerVersion);
-  }, [compilerVersion]);
+const toCodeList = (projectId: string, data: ProjectData): code[] => [
+  {
+    id: projectId,
+    nodeType: "Main",
+    code: decodeBase64(data.mainCode),
+  },
+  ...data.nodeCodes.map((item) => ({
+    id: item.id,
+    nodeType: item.nodeType,
+    code: decodeBase64(item.code),
+  })),
+];
+
+/** プロジェクトを変換し、生成されたコード一覧を取得する */
+async function fetchProjectCode(
+  id: string,
+  version: string,
+  signal?: AbortSignal,
+): Promise<code[]> {
+  const convertRes = await postJson(
+    `${API_BASE}/project/${id}/convert`,
+    { version },
+    signal,
+  );
+  if (!convertRes.ok) throw new ApiError("コードの取得に失敗しました");
+
+  const res = await fetch(`${API_BASE}/project/${id}`, { signal });
+  if (!res.ok) throw new ApiError("コードの取得に失敗しました");
+
+  const json = await readJson<ProjectResponse>(res);
+  if (json?.status !== "ok" || !json.data) {
+    throw new ApiError("コードの取得に失敗しました");
+  }
+  return toCodeList(id, json.data);
+}
+
+/** 編集したノードのコードを送って再コンパイルする */
+async function recompileProject(
+  id: string,
+  version: string,
+  codeList: code[],
+): Promise<code[]> {
+  const nodeCodes = codeList
+    .filter((item) => item.nodeType !== "Main")
+    .map((item) => ({ id: item.id, code: encodeBase64(item.code) }));
+
+  const res = await postJson(`${API_BASE}/project/${id}/recompile`, {
+    version,
+    nodeCodes,
+  });
+  const json = await readJson<ProjectResponse>(res);
+
+  if (!res.ok || json?.status !== "ok" || !json.data) {
+    const message = [json?.error?.message, json?.error?.details]
+      .filter(Boolean)
+      .join("\n");
+    throw new ApiError(message || "再コンパイルに失敗しました");
+  }
+  return toCodeList(id, json.data);
+}
+
+/** Mainコードを書き込みサーバーに送り、書き込み用のIDを返す */
+async function uploadMainCode(mainCode: string): Promise<string> {
+  const res = await postJson(COMPILE_URL, { code: encodeBase64(mainCode) });
+  const json = await readJson<{ id?: string }>(res);
+  if (!res.ok || !json?.id) throw new ApiError("アップロードに失敗しました");
+  return json.id;
+}
+
+
+const isCompilerVersion = (
+  v: string | null | undefined,
+): v is CompilerVersion =>
+  !!v && (COMPILER_VERSIONS as readonly string[]).includes(v);
+
+const readSavedVersion = (): string | null => {
+  try {
+    return localStorage.getItem(VERSION_STORAGE_KEY);
+  } catch {
+    return null; 
+  }
+};
+
+const saveVersion = (v: CompilerVersion) => {
+  try {
+    localStorage.setItem(VERSION_STORAGE_KEY, v);
+  } catch {
+  }
+};
+
+function useCompilerVersion(urlVersion: string | null) {
+  const [version, setVersionState] = useState<CompilerVersion>(DEFAULT_VERSION);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
+    setVersionState(
+      [urlVersion, readSavedVersion()].find(isCompilerVersion) ??
+        DEFAULT_VERSION,
+    );
+    setReady(true);
+  }, [urlVersion]);
 
-    const loadData = async () => {
-      if (!mainId) return;
+  // ユーザーが選んだときだけ保存する
+  const setVersion = useCallback((v: string) => {
+    if (!isCompilerVersion(v)) return;
+    setVersionState(v);
+    saveVersion(v);
+  }, []);
 
-      setIsConverting(true);
+  return { version, setVersion, ready };
+}
+
+
+
+type EditorPaneProps = {
+  codeList: code[];
+  setCodeList: React.Dispatch<React.SetStateAction<code[]>>;
+  index: number;
+  setIndex: React.Dispatch<React.SetStateAction<number>>;
+  onChange: (index: number, value: string | undefined) => void;
+};
+
+function EditorPane({
+  codeList,
+  setCodeList,
+  index,
+  setIndex,
+  onChange,
+}: EditorPaneProps) {
+  return (
+    <EditorComponent
+      code={codeList[index]?.code ?? ""}
+      handleEditorChange={(value) => onChange(index, value)}
+      codeList={codeList}
+      setCodeList={setCodeList}
+      open={index}
+      setOpen={setIndex}
+    />
+  );
+}
+
+export function Main() {
+  const [searchParams] = useSearchParams();
+  const mainId = searchParams.get("id") ?? undefined;
+
+  const {
+    version: compilerVersion,
+    setVersion: setCompilerVersion,
+    ready: versionReady,
+  } = useCompilerVersion(searchParams.get("version"));
+
+  const [codeList, setCodeList] = useState<code[]>([]);
+  const [leftIndex, setLeftIndex] = useState(0);
+  const [rightIndex, setRightIndex] = useState(0);
+  const [isMultiEditor, setIsMultiEditor] = useState(false);
+  const [status, setStatus] = useState<Status>("idle");
+  const busy = status !== "idle";
+
+  // プロジェクトID・バージョンが決まったら変換してコードを取得する
+  useEffect(() => {
+    if (!mainId || !versionReady) return;
+
+    const controller = new AbortController();
+
+    const load = async () => {
+      setStatus("converting");
       try {
-        const fetchedCode = await FetchCode(mainId, compilerVersion);
-
-        if (!fetchedCode || fetchedCode.status !== "ok") {
-          if (!cancelled) alert("コードの取得に失敗しました");
-          return;
-        }
-
-        const newItems: code[] = [
-          {
-            id: mainId,
-            nodeType: "Main",
-            code: decodeBase64(fetchedCode.data.mainCode),
-          },
-          ...fetchedCode.data.nodeCodes.map((item: code) => ({
-            id: item.id,
-            nodeType: item.nodeType,
-            code: decodeBase64(item.code),
-          })),
-        ];
-
-        if (!cancelled) {
-          setCodeList(newItems);
-          setOpenRight(0);
-          setOpenLeft(0);
-        }
+        const items = await fetchProjectCode(
+          mainId,
+          compilerVersion,
+          controller.signal,
+        );
+        if (controller.signal.aborted) return;
+        setCodeList(items);
+        setLeftIndex(0);
+        setRightIndex(0);
       } catch (e) {
+        if (controller.signal.aborted) return;
         console.error(e);
-        if (!cancelled) {
-          alert("サーバーとの通信に失敗しました");
-        }
+        alert(errorMessage(e, "サーバーとの通信に失敗しました"));
       } finally {
-        if (!cancelled) setIsConverting(false);
+        if (!controller.signal.aborted) setStatus("idle");
       }
     };
+    void load();
 
-    loadData();
+    return () => controller.abort();
+  }, [mainId, compilerVersion, versionReady]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [mainId, compilerVersion]);
-
-  const handleEditorChange = (value: string | undefined, openIndex: number) => {
-    const newValue = value || "";
-
-    setCodeList((prevList) => {
-      const newList = [...prevList];
-
-      if (!newList[openIndex]) return prevList;
-
-      newList[openIndex] = {
-        ...newList[openIndex],
-        code: newValue,
-      };
-
-      return newList;
-    });
-  };
-
-  const toggleMultiEditor = () => {
-    setIsMultiEditor((prev) => !prev);
-  };
+  const updateCode = useCallback((index: number, value: string | undefined) => {
+    setCodeList((prev) =>
+      prev[index]
+        ? prev.map((item, i) =>
+            i === index ? { ...item, code: value ?? "" } : item,
+          )
+        : prev,
+    );
+  }, []);
 
   const handleRecompile = async () => {
     if (!mainId) {
       alert("プロジェクトIDが取得できません");
       return;
     }
+    if (busy) return;
 
-    if (isRecompiling || isConverting) return;
-
-    setIsRecompiling(true);
-
+    setStatus("recompiling");
     try {
-      const nodeCodes = codeList
-        .filter((item) => item.nodeType !== "Main")
-        .map((item) => ({
-          id: item.id,
-          code: encodeBase64(item.code),
-        }));
-
-      const res = await fetch(`${API_BASE}/project/${mainId}/recompile`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          version: compilerVersion,
-          nodeCodes,
-        }),
-      });
-
-      const json = await res.json();
-
-      if (!res.ok || json.status !== "ok") {
-        alert(
-          [json.error?.message, json.error?.details]
-            .filter(Boolean)
-            .join("\n") || "再コンパイルに失敗しました",
-        );
-        return;
-      }
-
-      const newItems: code[] = [
-        {
-          id: mainId,
-          nodeType: "Main",
-          code: decodeBase64(json.data.mainCode),
-        },
-        ...json.data.nodeCodes.map((item: code) => ({
-          id: item.id,
-          nodeType: item.nodeType,
-          code: decodeBase64(item.code),
-        })),
-      ];
-
-      setCodeList(newItems);
-
+      setCodeList(await recompileProject(mainId, compilerVersion, codeList));
       alert("再コンパイルに成功しました");
     } catch (e) {
       console.error(e);
-      alert("再コンパイル中にエラーが発生しました");
+      alert(errorMessage(e, "再コンパイル中にエラーが発生しました"));
     } finally {
-      setIsRecompiling(false);
+      setStatus("idle");
     }
   };
 
   const handleWriteToMcu = async () => {
+    const mainCode = codeList.find((item) => item.id === mainId)?.code;
+    if (mainCode === undefined) {
+      alert("Mainコードが見つかりません");
+      return;
+    }
+
     try {
-      const mainCode = codeList.find((item) => item.id === mainId)?.code;
-
-      if (mainCode === undefined) {
-        alert("Mainコードが見つかりません");
-        return;
-      }
-
-      const res = await fetch(
-        "https://ceres.epi.it.matsue-ct.ac.jp/compile/code",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            code: encodeBase64(mainCode),
-          }),
-        },
-      );
-
-      const json = await res.json();
-
-      if (!res.ok) {
-        alert("アップロードに失敗しました");
-        return;
-      }
-
-      window.open(`https://kaniwriter.poporon.org/?id=${json.id}`, "_blank");
+      const writeId = await uploadMainCode(mainCode);
+      const url = new URL("https://kaniwriter.poporon.org/");
+      url.searchParams.set("id", writeId);
+      window.open(url.toString(), "_blank");
     } catch (e) {
       console.error(e);
-      alert("マイコン書き込みサーバーとの通信に失敗しました");
+      alert(errorMessage(e, "マイコン書き込みサーバーとの通信に失敗しました"));
     }
   };
 
@@ -256,15 +316,15 @@ export function Main() {
       <div className="flex flex-row items-end justify-end m-2 gap-3">
         <button
           type="button"
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          onClick={toggleMultiEditor}
+          className={BUTTON_GREEN}
+          onClick={() => setIsMultiEditor((prev) => !prev)}
         >
           {isMultiEditor ? "タブを1つにする" : "タブを2つにする"}
         </button>
 
         <button
           type="button"
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className={BUTTON_GREEN}
           onClick={handleWriteToMcu}
         >
           マイコンへ書き込む
@@ -272,11 +332,11 @@ export function Main() {
 
         <button
           type="button"
-          disabled={isRecompiling || isConverting || !mainId}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          disabled={busy || !mainId}
+          className={BUTTON_BLUE}
           onClick={handleRecompile}
         >
-          {isRecompiling ? "再コンパイル中..." : "再コンパイル"}
+          {status === "recompiling" ? "再コンパイル中..." : "再コンパイル"}
         </button>
 
         <div className="flex flex-col gap-1">
@@ -286,14 +346,14 @@ export function Main() {
           >
             コンパイラバージョン
           </label>
-
           <select
             id="compilerVersion"
             value={compilerVersion}
+            disabled={busy}
             onChange={(e) => setCompilerVersion(e.target.value)}
-            className="flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className={BUTTON_GREEN}
           >
-            {compilerVersions.map((version) => (
+            {COMPILER_VERSIONS.map((version) => (
               <option key={version} value={version}>
                 {version}
               </option>
@@ -304,28 +364,22 @@ export function Main() {
 
       <div className="mx-2 border-3 dark:border-zinc-400">
         <div className="flex bg-gray-800">
-          <EditorComponent
-            code={codeList[openRight]?.code || ""}
-            handleEditorChange={(value) => handleEditorChange(value, openRight)}
+          <EditorPane
             codeList={codeList}
             setCodeList={setCodeList}
-            open={openRight}
-            setOpen={setOpenRight}
+            index={leftIndex}
+            setIndex={setLeftIndex}
+            onChange={updateCode}
           />
-
           {isMultiEditor && (
             <>
               <span className="w-1 bg-gray-100" />
-
-              <EditorComponent
-                code={codeList[openLeft]?.code || ""}
-                handleEditorChange={(value) =>
-                  handleEditorChange(value, openLeft)
-                }
+              <EditorPane
                 codeList={codeList}
                 setCodeList={setCodeList}
-                open={openLeft}
-                setOpen={setOpenLeft}
+                index={rightIndex}
+                setIndex={setRightIndex}
+                onChange={updateCode}
               />
             </>
           )}
